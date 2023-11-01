@@ -32,44 +32,6 @@ class Flatten(nn.Module):
         return x.view(x.size(0), -1)
 
 
-class ChannelGate(nn.Module):
-    def __init__(self, gate_channels, reduction_ratio=16, pool_types=['avg', 'max']):
-        super(ChannelGate, self).__init__()
-        self.gate_channels = gate_channels
-        self.mlp = nn.Sequential(
-            Flatten(),
-            nn.Linear(gate_channels, gate_channels // reduction_ratio),
-            nn.ReLU(),
-            nn.Linear(gate_channels // reduction_ratio, gate_channels)
-        )
-        self.pool_types = pool_types
-
-    def forward(self, x):
-        channel_att_sum = None
-        for pool_type in self.pool_types:
-            if pool_type == 'avg':
-                avg_pool = F.avg_pool2d(x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
-                channel_att_raw = self.mlp(avg_pool)
-            elif pool_type == 'max':
-                max_pool = F.max_pool2d(x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
-                channel_att_raw = self.mlp(max_pool)
-            elif pool_type == 'lp':
-                lp_pool = F.lp_pool2d(x, 2, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
-                channel_att_raw = self.mlp(lp_pool)
-            elif pool_type == 'lse':
-                # LSE pool only
-                lse_pool = logsumexp_2d(x)
-                channel_att_raw = self.mlp(lse_pool)
-
-            if channel_att_sum is None:
-                channel_att_sum = channel_att_raw
-            else:
-                channel_att_sum = channel_att_sum + channel_att_raw
-
-        scale = F.sigmoid(channel_att_sum).unsqueeze(2).unsqueeze(3).expand_as(x)
-        return x * scale
-
-
 def logsumexp_2d(tensor):
     tensor_flatten = tensor.view(tensor.size(0), tensor.size(1), -1)
     s, _ = torch.max(tensor_flatten, dim=2, keepdim=True)
@@ -608,83 +570,6 @@ class Net(nn.Module):
         return out1, out2, out3
 
 
-class Discriminator(nn.Module):
-    def __init__(self, input_nc=3):
-        super(Discriminator, self).__init__()
-
-        # A bunch of convolutions one after another
-        model = [nn.Conv2d(input_nc, 64, 4, stride=2, padding=1),
-                 nn.LeakyReLU(0.2, inplace=True)]
-
-        model += [nn.Conv2d(64, 128, 4, stride=2, padding=1),
-                  nn.BatchNorm2d(128),
-                  nn.LeakyReLU(0.2, inplace=True)]
-
-        model += [nn.Conv2d(128, 256, 4, stride=2, padding=1),
-                  nn.BatchNorm2d(256),
-                  nn.LeakyReLU(0.2, inplace=True)]
-
-        model += [nn.Conv2d(256, 512, 4, padding=1),
-                  nn.BatchNorm2d(512),
-                  nn.LeakyReLU(0.2, inplace=True)]
-
-        # FCN classification layer
-        model += [nn.Conv2d(512, 1, 4, padding=1)]
-
-        self.model = nn.Sequential(*model)
-
-    def forward(self, x):
-        x = self.model(x)
-        # Average pooling and flatten
-        return torch.sigmoid(F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1))
-'''
-class Discriminator(nn.Module):
-    def __init__(self):
-        super(Discriminator, self).__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, padding=1),
-            nn.LeakyReLU(0.2),
-
-            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU(0.2),
-
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.2),
-
-            nn.Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.2),
-
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2),
-
-            nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2),
-
-            nn.Conv2d(256, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2),
-
-            nn.Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2),
-
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(512, 1024, kernel_size=1),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(1024, 1, kernel_size=1)  # ,
-
-            # nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        batch_size = x.size(0)
-        return torch.sigmoid(self.net(x).view(batch_size))
-'''
 if __name__ == '__main__':
     net = Net().cuda()
     input_tensor = torch.Tensor(np.random.random((1, 3, 1500, 1000))).cuda()
